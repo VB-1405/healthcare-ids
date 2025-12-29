@@ -3,7 +3,7 @@ interface: "wlan0"
 # Device inventory / expected endpoints
 devices:
   - name: "InfusionPump01"
-    ip: "192.168.7.16"
+    ip: "192.168.7.16" #your server IP for now.
   - name: "PatientMonitor07"
     ip: "10.0.10.37"
 
@@ -15,7 +15,7 @@ allowed_endpoints:
   - "10.0.10.5"     # DNS
   - "10.0.20.12"    # PACS
   - "10.0.30.8"     # EHR gateway
-  - "192.168.7.16"
+  - "192.168.7.16"  # your server IP for now
 
 # Alerting
 alerts:
