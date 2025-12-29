@@ -1,0 +1,34 @@
+interface: "wlan0"
+
+# Device inventory / expected endpoints
+devices:
+  - name: "InfusionPump01"
+    ip: "192.168.7.16"
+  - name: "PatientMonitor07"
+    ip: "10.0.10.37"
+
+# Common healthcare ports/examples (customize!)
+allowed_ports: [53, 80, 443, 123, 161, 162, 502, 104, 11112]  # DNS, HTTP/S, NTP, SNMP, Modbus, DICOM, etc.
+
+# Allowlist of known backend services (EHR, PACS, NTP, DNS, management)
+allowed_endpoints:
+  - "10.0.10.5"     # DNS
+  - "10.0.20.12"    # PACS
+  - "10.0.30.8"     # EHR gateway
+  - "192.168.7.16"
+
+# Alerting
+alerts:
+  print: true
+  jsonl_path: "./alerts.jsonl"
+  syslog:
+    enabled: false
+    host: "10.0.1.50"
+    port: 514
+
+# Model/training
+model:
+  path: "./ids_isoforest.joblib"
+  window_seconds: 30
+  min_train_windows: 200
+  contamination: 0.02

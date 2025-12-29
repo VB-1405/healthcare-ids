@@ -1,0 +1,14 @@
+# Python
+__pycache__/
+*.pyc
+
+# Virtual environments
+.venv/
+venv/
+
+# Logs / artifacts
+alerts.jsonl
+*.joblib
+
+# OS
+.DS_Store
