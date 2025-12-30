@@ -114,22 +114,19 @@ class FlowWindowAggregator:
         src = pkt[IP].src
         dst = pkt[IP].dst
         proto = "OTHER"
+        sport = 0
         dport = 0
 
         if TCP in pkt:
             proto = "TCP"
+            sport = int(pkt[TCP].sport)
             dport = int(pkt[TCP].dport)
-            flags = int(pkt[TCP].flags)
-            # SYN = 0x02, RST = 0x04
-            if flags & 0x02:
-                self.tcp_syn[(src,)] += 1
-            if flags & 0x04:
-                self.tcp_rst[(src,)] += 1
         elif UDP in pkt:
             proto = "UDP"
+            sport = int(pkt[UDP].sport)
             dport = int(pkt[UDP].dport)
 
-        k = self._key(src, dst, proto, dport)
+        k = self._key(src, dst, proto, sport, dport)
         self.counts[k] += 1
         self.bytes_[k] += len(pkt)
 
@@ -146,7 +143,7 @@ class FlowWindowAggregator:
         """
         now = time.time()
         rows = []
-        for (src, dst, proto, dport), c in list(self.counts.items()):
+        for (src, dst, proto, sport, dport), c in list(self.counts.items()):
             b = self.bytes_[(src, dst, proto, dport)]
             rows.append({
                 "window_start": self.window_start,
@@ -158,6 +155,8 @@ class FlowWindowAggregator:
                 "pkt_count": int(c),
                 "byte_count": int(b),
                 "avg_pkt_size": float(b / c) if c else 0.0,
+                "src_port": int(sport),
+                "dst_port": int(dport)
 
                 # src fanout / scanning-ish signals
                 "unique_dst_count": int(len(self.unique_dsts.get(src, set()))),
