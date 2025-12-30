@@ -131,8 +131,41 @@ def rule_icmp_ping(row, ctx):
         )
     return None
 
+def rule_mqtt_detected(row, ctx):
+    src = row["src_ip"]
+    dst = row["dst_ip"]
+    proto = row.get("proto", "")
+    dport = int(row.get("dst_port", 0) or 0)
+
+    involved = (src in ctx["device_ips"]) or (dst in ctx["device_ips"])
+    if involved and proto == "TCP" and dport in {1883, 8883}:
+        return _mk(
+            "MQTT_TRAFFIC",
+            "low",
+            "MQTT traffic involving monitored device",
+            {"dst_port": dport}
+        )
+    return None
+
+def rule_mqtt_unexpected_broker(row, ctx):
+    src = row["src_ip"]
+    dst = row["dst_ip"]
+    dport = int(row.get("dst_port", 0) or 0)
+
+    if src in ctx["device_ips"] and dport in {1883, 8883}:
+        if dst not in ctx["allowed_endpoints"]:
+            return _mk(
+                "MQTT_UNEXPECTED_BROKER",
+                "high",
+                "Device sent MQTT to a non-allowlisted broker",
+                {"broker": dst, "dst_port": dport}
+            )
+    return None
+
+
 # Export a ruleset (Snort-like)
 HEALTHCARE_RULESET = [
+    rule_mqtt_detected,
     rule_icmp_ping,
     rule_device_to_internet,
     rule_unsafe_protocols,

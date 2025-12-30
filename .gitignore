@@ -3,12 +3,19 @@ __pycache__/
 *.pyc
 
 # Virtual environments
-.venv/
 venv/
+.venv/
 
-# Logs / artifacts
+# Runtime logs
 alerts.jsonl
+ids.stdout.log
+
+# ML artifacts
 *.joblib
+
+# Backups
+backup/
+*.bak
 
 # OS
 .DS_Store

@@ -3,19 +3,20 @@ interface: "wlan0"
 # Device inventory / expected endpoints
 devices:
   - name: "InfusionPump01"
-    ip: "192.168.7.16" #your server IP for now.
-  - name: "PatientMonitor07"
-    ip: "10.0.10.37"
+    ip: "192.168.7.16"
+  - name: "VitalsMonitor01"
+    ip: "127.0.0.1"
 
 # Common healthcare ports/examples (customize!)
-allowed_ports: [53, 80, 443, 123, 161, 162, 502, 104, 11112]  # DNS, HTTP/S, NTP, SNMP, Modbus, DICOM, etc.
+allowed_ports: [53, 80, 443, 123, 161, 162, 502, 104, 11112, 1883, 8883]  # DNS, HTTP/S, NTP, SNMP, Modbus, DICOM, etc.
 
 # Allowlist of known backend services (EHR, PACS, NTP, DNS, management)
 allowed_endpoints:
   - "10.0.10.5"     # DNS
   - "10.0.20.12"    # PACS
   - "10.0.30.8"     # EHR gateway
-  - "192.168.7.16"  # your server IP for now
+  - "192.168.7.16"
+  - "0.0.0.0"
 
 # Alerting
 alerts:
