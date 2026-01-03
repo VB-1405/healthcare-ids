@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Healthcare IDS</title>
+  <link rel="stylesheet" href="/static/style.css" />
+  <script defer src="/static/app.js"></script>
+</head>
+<body>
+  {% include "partials/navbar.html" %}
+
+  <main class="page">
+    {% block content %}{% endblock %}
+  </main>
+
+  <div id="toast" class="toast hidden"></div>
+</body>
+</html>

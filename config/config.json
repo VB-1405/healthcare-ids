@@ -1,0 +1,6 @@
+{
+  "allowlisted_subnets": ["192.168.0.0/16"],
+  "allowlisted_ports": [22, 53, 80, 443, 5000, 8443],
+  "known_devices": ["192.168.7.16"],
+  "allowlisted_endpoints": ["192.168.7.0/24", "192.168.4.0/24"]
+}

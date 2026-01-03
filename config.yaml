@@ -1,35 +1,14 @@
-interface: "wlan0"
+interface: wlan0
+window_sec: 30
+alerts_file: /home/kali/Desktop/AI_Project/alerts.jsonl
+rules_file: /home/kali/Desktop/AI_Project/rules/rules.yaml
 
-# Device inventory / expected endpoints
-devices:
-  - name: "InfusionPump01"
-    ip: "192.168.7.16"
-  - name: "VitalsMonitor01"
-    ip: "127.0.0.1"
+# --- Detection knobs
+ping_threshold: 5
+ping_cooldown_sec: 60
 
-# Common healthcare ports/examples (customize!)
-allowed_ports: [53, 80, 443, 123, 161, 162, 502, 104, 11112, 1883, 8883]  # DNS, HTTP/S, NTP, SNMP, Modbus, DICOM, etc.
+# Port-sweep / nmap-like scan heuristic
+portscan_unique_dst_ports_threshold: 30
+portscan_window_sec: 30
+portscan_cooldown_sec: 60
 
-# Allowlist of known backend services (EHR, PACS, NTP, DNS, management)
-allowed_endpoints:
-  - "10.0.10.5"     # DNS
-  - "10.0.20.12"    # PACS
-  - "10.0.30.8"     # EHR gateway
-  - "192.168.7.16"
-  - "0.0.0.0"
-
-# Alerting
-alerts:
-  print: true
-  jsonl_path: "./alerts.jsonl"
-  syslog:
-    enabled: false
-    host: "10.0.1.50"
-    port: 514
-
-# Model/training
-model:
-  path: "./ids_isoforest.joblib"
-  window_seconds: 30
-  min_train_windows: 200
-  contamination: 0.02

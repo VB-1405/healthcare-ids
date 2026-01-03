@@ -1,0 +1,25 @@
+<header class="topbar">
+  <div class="topbar-left">
+    <div class="brand">Healthcare IDS</div>
+
+    <nav class="navlinks">
+      <a class="navlink" href="/">Dashboard</a>
+      <a class="navlink" href="/alerts">Alerts</a>
+      <a class="navlink" href="/logs">Logs</a>
+      <a class="navlink" href="/rules">Rules</a>
+    </nav>
+  </div>
+
+  <div class="topbar-right">
+    <div class="status-pill {{ 'running' if status.running else 'stopped' }}">
+      Status: {{ 'RUNNING' if status.running else 'STOPPED' }}
+      <span class="pid">pid={{ status.pid if status.pid else '-' }}</span>
+    </div>
+
+    <div class="btnrow">
+      <button class="btn" id="btnStart">Start IDS</button>
+      <button class="btn" id="btnStop">Stop IDS</button>
+      <button class="btn" id="btnReload">Reload IDS</button>
+    </div>
+  </div>
+</header>

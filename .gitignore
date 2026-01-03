@@ -1,21 +1,10 @@
-# Python
 __pycache__/
 *.pyc
-
-# Virtual environments
+*.log
+.ids.pid
+.env
 venv/
 .venv/
-
-# Runtime logs
-alerts.jsonl
-ids.stdout.log
-
-# ML artifacts
-*.joblib
-
-# Backups
-backup/
-*.bak
-
-# OS
+*.sqlite3
 .DS_Store
+

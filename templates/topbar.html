@@ -1,0 +1,31 @@
+<div class="topbar">
+  <div class="topbar-left">
+    <div class="brand">Healthcare IDS</div>
+    <div class="tabs">
+      <a class="tab" href="/">Dashboard</a>
+      <a class="tab" href="/alerts">Alerts</a>
+      <a class="tab" href="/logs">Logs</a>
+      <a class="tab" href="/rules">Rules</a>
+    </div>
+  </div>
+
+  <div class="topbar-right">
+    <div class="status-wrap">
+      <span class="status-label">Status:</span>
+      {% if status.running %}
+        <span class="pill pill-green">RUNNING</span>
+        <span class="pid">pid={{ status.pid }}</span>
+      {% else %}
+        <span class="pill pill-red">STOPPED</span>
+        <span class="pid">pid=--</span>
+      {% endif %}
+    </div>
+
+    <div class="btns">
+      <button class="btn" id="btnStart">Start IDS</button>
+      <button class="btn" id="btnStop">Stop IDS</button>
+      <button class="btn" id="btnReload">Reload IDS</button>
+    </div>
+  </div>
+</div>
+

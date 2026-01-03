@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="card">
+  <div class="cardhead">
+    <div>
+      <h1>Logs</h1>
+      <div class="subtext">IDS log: <span class="mono">{{ ids_log_path }}</span> · App log: <span class="mono">{{ app_log_path }}</span></div>
+    </div>
+
+    <div class="cardhead-right">
+      <select id="logWhich" class="select">
+        <option value="ids" selected>IDS Log</option>
+        <option value="app">App Log</option>
+      </select>
+      <button class="btn ghost" id="btnClearLogs">Clear Logs</button>
+    </div>
+  </div>
+
+  <pre class="logbox" id="logBox"></pre>
+</section>
+{% endblock %}

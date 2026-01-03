@@ -1,0 +1,23 @@
+# config.yaml
+# Main runtime settings. ids.py loads this first, then applies rules/rules.yaml.
+
+interface: "wlan0"
+window_sec: 30
+
+alerts_file: "/home/kali/Desktop/AI_Project/alerts.jsonl"
+stdout_log: "/home/kali/Desktop/AI_Project/ids.stdout.log"
+rules_file: "/home/kali/Desktop/AI_Project/rules/rules.yaml"
+
+# Optional: keep these OFF unless you want those alerts
+detect_unexpected_port: false
+detect_unexpected_endpoint: false
+
+# If you want to focus only on Kali as the protected device
+known_devices:
+  - "192.168.7.16"
+
+allowlisted_subnets:
+  - "192.168.7.0/24"
+
+allowlisted_ports_tcp: [22, 80, 443, 5000, 8080, 8443]
+allowlisted_ports_udp: [53]

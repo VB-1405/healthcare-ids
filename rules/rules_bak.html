@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% block content %}
+  <div class="pagehead">
+    <h2>Rules</h2>
+    <div class="controls">
+      <button class="btn" id="btnReloadRules">Reload from file</button>
+      <button class="btn" id="btnSaveRules">Save Rules</button>
+      <div class="muted small">Editing {{rules_path}}</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="rulebuilder">
+      <h3>Write rules using the UI</h3>
+
+      <div class="builder-row">
+        <label>Rule Type</label>
+        <select id="ruleType">
+          <option value="PING_SCAN">PING scan (ICMP threshold)</option>
+          <option value="PORT_SWEEP">Nmap-like port sweep (many unique ports)</option>
+        </select>
+      </div>
+
+      <div class="builder-row">
+        <label>Rule ID</label>
+        <input id="ruleId" type="text" placeholder="example: my_ping_scan" />
+      </div>
+
+      <div class="builder-row">
+        <label>Severity</label>
+        <select id="ruleSeverity">
+          <option value="low">low</option>
+          <option value="medium">medium</option>
+          <option value="high" selected>high</option>
+        </select>
+      </div>
+
+      <div class="builder-row grid2">
+        <div>
+          <label>Window (sec)</label>
+          <input id="ruleWindow" type="number" value="30" min="1" />
+        </div>
+        <div>
+          <label>Cooldown (sec)</label>
+          <input id="ruleCooldown" type="number" value="60" min="0" />
+        </div>
+      </div>
+
+      <div id="pingFields" class="builder-row">
+        <label>Ping threshold (count in window)</label>
+        <input id="pingThreshold" type="number" value="5" min="1" />
+      </div>
+
+      <div id="portFields" class="builder-row hidden">
+        <label>Unique destination ports threshold</label>
+        <input id="portThreshold" type="number" value="25" min="1" />
+      </div>
+
+      <div class="builder-row">
+        <button class="btn" id="btnAddRule">Add rule to editor</button>
+      </div>
+
+      <div class="muted small">
+        Tip: “Nmap scan rule” in this project maps to a <b>port sweep</b> detector (many different destination ports in a short window).
+      </div>
+    </div>
+
+    <hr class="sep"/>
+
+    <textarea id="rulesEditor" class="rules-editor" spellcheck="false">{{rules_text}}</textarea>
+  </div>
+{% endblock %}

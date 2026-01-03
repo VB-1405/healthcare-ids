@@ -1,0 +1,73 @@
+rules:
+  # ---------------------------
+  # NMAP / SCANNING DETECTIONS
+  # ---------------------------
+
+  # 1) Classic port sweep / connect scan / SYN scan behavior:
+  # many destination ports to the same dst within a short window
+  - id: nmap_port_sweep_fast
+    enabled: true
+    type: PORT_SWEEP
+    severity: high
+    unique_dst_port_threshold: 15
+    window_sec: 15
+    cooldown_sec: 60
+    msg: "Nmap-like port sweep (many destination ports in short window)"
+
+  # Slightly slower scans (e.g., --scan-delay, or slower timing templates)
+  - id: nmap_port_sweep_slow
+    enabled: true
+    type: PORT_SWEEP
+    severity: medium
+    unique_dst_port_threshold: 25
+    window_sec: 60
+    cooldown_sec: 120
+    msg: "Possible slow port sweep (nmap timing or delayed scan)"
+
+  # 2) Host discovery / ping sweep:
+  # ICMP echo requests to multiple hosts or frequent pings in window
+  - id: nmap_ping_sweep
+    enabled: true
+    type: PING_SCAN
+    severity: low
+    ping_threshold: 6
+    window_sec: 10
+    cooldown_sec: 30
+    msg: "Ping sweep / host discovery behavior"
+
+  # 3) Version detection often hits common service ports quickly.
+  # This is not "proof" but good correlation signal.
+  # Use as medium so you don’t alert on normal browsing/ssh.
+  - id: nmap_service_probe_common_ports
+    enabled: true
+    type: PORT_SWEEP
+    severity: medium
+    unique_dst_port_threshold: 8
+    window_sec: 8
+    cooldown_sec: 45
+    msg: "Service probing pattern (fast touches across common service ports)"
+
+  # 4) UDP scan patterns can look different (fewer replies, more attempts).
+  # If your IDS supports UDP counting the same way, this helps.
+  - id: nmap_udp_probe_sweep
+    enabled: true
+    type: PORT_SWEEP
+    severity: high
+    unique_dst_port_threshold: 10
+    window_sec: 20
+    cooldown_sec: 90
+    msg: "UDP probing sweep (nmap -sU style behavior)"
+
+  # ---------------------------
+  # SAFETY / NOISE CONTROL
+  # ---------------------------
+
+  # Reduce noise if your network has background discovery tools.
+  # Keep enabled=false until you know you need it.
+  - id: suppress_low_severity_when_busy
+    enabled: false
+    type: SUPPRESSION
+    severity: low
+    window_sec: 30
+    cooldown_sec: 30
+    msg: "Optional suppression to reduce low-severity spam"

@@ -1,0 +1,27 @@
+# rules/rules.yaml
+# Purpose: Make ping generate ONE alert per window, and disable noisy detections.
+
+ping:
+  enabled: true
+  severity: medium        # severity used for PING_SCAN
+  threshold: 5            # >=5 echo requests in window => PING_SCAN
+  window_sec: 30          # aggregation window
+  cooldown_sec: 60        # don't repeat same (type, src, dst) within 60s
+
+noise_controls:
+  detect_unexpected_port: false
+  detect_unexpected_endpoint: false
+
+allowlists:
+  # Adjust to your LAN
+  allowlisted_subnets:
+    - "192.168.7.0/24"
+
+  # Keep common stuff from triggering (only used if you enable noise rules)
+  allowlisted_ports_tcp: [22, 80, 443, 5000, 8080, 8443]
+  allowlisted_ports_udp: [53]
+
+  # If you set known devices, the noisy checks apply only to these
+  # For your case, Kali is 192.168.7.16
+  known_devices:
+    - "192.168.7.16"

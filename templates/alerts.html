@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="card">
+  <div class="cardhead">
+    <div>
+      <h1>Alerts</h1>
+      <div class="subtext">Live alerts from <span class="mono">{{ alerts_path }}</span></div>
+    </div>
+    <div class="cardhead-right">
+      <div class="searchwrap">
+        <input id="alertSearch" class="search" placeholder="Search (src, dst, protocol, message, type, severity...)" />
+        <div class="count" id="alertCount">0 shown</div>
+      </div>
+      <button class="btn ghost" id="btnClearAlerts">Clear Alerts</button>
+    </div>
+  </div>
+
+  <div class="tablewrap">
+    <table class="table" id="alertsTable">
+      <thead>
+        <tr>
+          <th>Timestamp</th>
+          <th>Severity</th>
+          <th>Type</th>
+          <th>Src IP</th>
+          <th>Src Port</th>
+          <th>Dst IP</th>
+          <th>Dst Port</th>
+          <th>Protocol</th>
+          <th>Message</th>
+          <th>Details</th>
+        </tr>
+      </thead>
+      <tbody id="alertsBody">
+        <!-- filled by JS -->
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

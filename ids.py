@@ -1,388 +1,307 @@
-import time
+import argparse
 import json
-import socket
-import threading
+import os
+import time
+import signal
 from collections import defaultdict, deque
-from dataclasses import dataclass, asdict
-from typing import Dict, Any, Optional, Tuple, List
+from datetime import datetime
 
-from scapy.all import sniff, IP, TCP, UDP, ICMP
+# Optional: real capture using scapy
+try:
+    from scapy.all import sniff, IP, TCP, UDP, ICMP
+    SCAPY_OK = True
+except Exception:
+    SCAPY_OK = False
 
-import yaml
-import numpy as np
-import pandas as pd
-
-from sklearn.ensemble import IsolationForest
-from joblib import dump, load
-
-from scapy.all import sniff, IP, TCP, UDP  # noqa: F401
-
-from rules.healthcare_rules import HEALTHCARE_RULESET
+RUNNING = True
 
 
-# ----------------------------
-# Alerting
-# ----------------------------
-
-@dataclass
-class Alert:
-    ts: float
-    severity: str
-    alert_type: str
-    src_ip: str
-    dst_ip: str
-    src_port: Optional[int]
-    dst_port: Optional[int]
-    proto: str
-    details: Dict[str, Any]
+def ts():
+    return datetime.now().strftime("%m/%d/%Y, %I:%M:%S %p")
 
 
-class AlertSink:
-    def __init__(self, print_enabled: bool, jsonl_path: Optional[str], syslog_cfg: Dict[str, Any]):
-        self.print_enabled = print_enabled
-        self.jsonl_path = jsonl_path
-        self.syslog_cfg = syslog_cfg or {}
-        self._lock = threading.Lock()
-
-    def emit(self, alert: Alert):
-        payload = asdict(alert)
-
-        if self.print_enabled:
-            print(json.dumps(payload, indent=2))
-
-        if self.jsonl_path:
-            with self._lock:
-                with open(self.jsonl_path, "a", encoding="utf-8") as f:
-                    f.write(json.dumps(payload) + "\n")
-
-        if self.syslog_cfg.get("enabled", False):
-            self._send_syslog(payload)
-
-    def _send_syslog(self, payload: Dict[str, Any]):
-        host = self.syslog_cfg.get("host", "127.0.0.1")
-        port = int(self.syslog_cfg.get("port", 514))
-        msg = json.dumps(payload)
+def log(msg, log_path=None):
+    line = f"[IDS] {msg}"
+    print(line, flush=True)
+    if log_path:
         try:
-            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            sock.sendto(msg.encode("utf-8"), (host, port))
-        except Exception as e:
-            if self.print_enabled:
-                print(f"[syslog error] {e}")
-        finally:
-            try:
-                sock.close()
-            except Exception:
-                pass
-
-
-# ----------------------------
-# Feature extraction (windowed flows)
-# ----------------------------
-
-class FlowWindowAggregator:
-    """
-    Aggregates packet observations into fixed-time windows per (src_ip, dst_ip, proto, src_port, dst_port).
-    Produces features suitable for anomaly detection + rule checks.
-    """
-    def __init__(self, window_seconds: int):
-        self.window_seconds = window_seconds
-        self.window_start = time.time()
-        self.counts = defaultdict(int)
-        self.bytes_ = defaultdict(int)
-        self.unique_dsts = defaultdict(set)
-        self.unique_dst_ports = defaultdict(set)
-        self.tcp_syn = defaultdict(int)
-        self.tcp_rst = defaultdict(int)
-
-    def _key(self, src_ip: str, dst_ip: str, proto: str, src_port: int, dst_port: int) -> Tuple[str, str, str, int, int]:
-        return (src_ip, dst_ip, proto, int(src_port), int(dst_port))
-
-    def observe(self, pkt):
-        if IP not in pkt:
-            return
-
-        src = pkt[IP].src
-        dst = pkt[IP].dst
-
-        proto = "OTHER"
-        sport = 0
-        dport = 0
-
-        if TCP in pkt:
-            proto = "TCP"
-            sport = int(pkt[TCP].sport)
-            dport = int(pkt[TCP].dport)
-            flags = int(pkt[TCP].flags)
-            # SYN = 0x02, RST = 0x04
-            if flags & 0x02:
-                self.tcp_syn[(src,)] += 1
-            if flags & 0x04:
-                self.tcp_rst[(src,)] += 1
-
-        elif UDP in pkt:
-            proto = "UDP"
-            sport = int(pkt[UDP].sport)
-            dport = int(pkt[UDP].dport)
-        
-        elif ICMP in pkt:
-            proto = "ICMP"
-            sport = 0
-            dport = 0
-
-        k = self._key(src, dst, proto, sport, dport)
-        self.counts[k] += 1
-        self.bytes_[k] += len(pkt)
-
-        self.unique_dsts[src].add(dst)
-        self.unique_dst_ports[src].add(dport)
-
-    def ready(self) -> bool:
-        return (time.time() - self.window_start) >= self.window_seconds
-
-    def flush(self) -> pd.DataFrame:
-        now = time.time()
-        rows = []
-
-        for (src, dst, proto, sport, dport), c in list(self.counts.items()):
-            b = self.bytes_[(src, dst, proto, sport, dport)]
-            rows.append({
-                "window_start": self.window_start,
-                "window_end": now,
-                "src_ip": src,
-                "dst_ip": dst,
-                "proto": proto,
-                "src_port": int(sport),
-                "dst_port": int(dport),
-                "pkt_count": int(c),
-                "byte_count": int(b),
-                "avg_pkt_size": float(b / c) if c else 0.0,
-
-                # src fanout / scanning-ish signals
-                "unique_dst_count": int(len(self.unique_dsts.get(src, set()))),
-                "unique_dst_port_count": int(len(self.unique_dst_ports.get(src, set()))),
-
-                # tcp flag signals per src
-                "tcp_syn_count_src": int(self.tcp_syn.get((src,), 0)),
-                "tcp_rst_count_src": int(self.tcp_rst.get((src,), 0)),
-            })
-
-        # reset window
-        self.window_start = time.time()
-        self.counts.clear()
-        self.bytes_.clear()
-        self.unique_dsts.clear()
-        self.unique_dst_ports.clear()
-        self.tcp_syn.clear()
-        self.tcp_rst.clear()
-
-        return pd.DataFrame(rows)
-
-
-# ----------------------------
-# Rule engine (Snort-like ruleset loop)
-# ----------------------------
-
-class RuleEngine:
-    def __init__(self, device_ips: List[str], allowed_ports: List[int], allowed_endpoints: List[str],
-                 scan_port_threshold: int = 15, scan_dst_threshold: int = 15, exfil_bytes_threshold: int = 2_000_000):
-        self.device_ips = set(device_ips)
-        self.allowed_ports = set(int(p) for p in allowed_ports)
-        self.allowed_endpoints = set(allowed_endpoints)
-
-        self.ctx = {
-            "device_ips": self.device_ips,
-            "allowed_ports": self.allowed_ports,
-            "allowed_endpoints": self.allowed_endpoints,
-            "scan_port_threshold": int(scan_port_threshold),
-            "scan_dst_threshold": int(scan_dst_threshold),
-            "exfil_bytes_threshold": int(exfil_bytes_threshold),
-        }
-
-    def evaluate_row(self, row: pd.Series) -> Optional[Alert]:
-        # Run each rule like a Snort ruleset; first match returns alert.
-        for rule in HEALTHCARE_RULESET:
-            spec = rule(row, self.ctx)
-            if not spec:
-                continue
-
-            src = row["src_ip"]
-            dst = row["dst_ip"]
-            return Alert(
-                ts=time.time(),
-                severity=spec.get("severity", "medium"),
-                alert_type=spec.get("alert_type", "RULE_MATCH"),
-                src_ip=src,
-                dst_ip=dst,
-                src_port=int(row.get("src_port", 0)) if row.get("src_port", None) is not None else None,
-                dst_port=int(row.get("dst_port", 0)) if row.get("dst_port", None) is not None else None,
-                proto=str(row.get("proto", "OTHER")),
-                details={
-                    "msg": spec.get("msg", ""),
-                    **{k: v for k, v in spec.items() if k not in {"severity", "alert_type", "msg"}}
-                }
-            )
-
-        return None
-
-
-# ----------------------------
-# ML model wrapper (Isolation Forest)
-# ----------------------------
-
-class AnomalyModel:
-    def __init__(self, path: str, contamination: float):
-        self.path = path
-        self.contamination = contamination
-        self.model: Optional[IsolationForest] = None
-
-    def load_if_exists(self) -> bool:
-        try:
-            self.model = load(self.path)
-            return True
+            with open(log_path, "a", encoding="utf-8") as f:
+                f.write(line + "\n")
         except Exception:
-            return False
-
-    def train(self, df: pd.DataFrame):
-        X = self._to_features(df)
-        self.model = IsolationForest(
-            n_estimators=200,
-            contamination=float(self.contamination),
-            random_state=42,
-            n_jobs=-1,
-        )
-        self.model.fit(X)
-        dump(self.model, self.path)
-
-    def score(self, df: pd.DataFrame) -> np.ndarray:
-        if self.model is None:
-            raise RuntimeError("Model not trained/loaded.")
-        X = self._to_features(df)
-        preds = self.model.predict(X)  # -1 anomaly, 1 normal
-        scores = self.model.decision_function(X)
-        return np.column_stack([preds, scores])
-
-    @staticmethod
-    def _to_features(df: pd.DataFrame) -> np.ndarray:
-        cols = [
-            "pkt_count", "byte_count", "avg_pkt_size",
-            "unique_dst_count", "unique_dst_port_count",
-            "tcp_syn_count_src", "tcp_rst_count_src",
-            "dst_port",
-        ]
-        return df[cols].fillna(0.0).astype(float).to_numpy()
+            pass
 
 
-# ----------------------------
-# Main IDS runtime
-# ----------------------------
-
-def load_config(path: str) -> Dict[str, Any]:
+def load_json(path):
     with open(path, "r", encoding="utf-8") as f:
-        return yaml.safe_load(f)
+        return json.load(f)
 
 
-def run_ids(config_path: str = "config.yaml"):
-    cfg = load_config(config_path)
+def safe_write_alert(alerts_path, alert_obj):
+    os.makedirs(os.path.dirname(alerts_path) or ".", exist_ok=True)
+    with open(alerts_path, "a", encoding="utf-8") as f:
+        f.write(json.dumps(alert_obj) + "\n")
 
-    iface = cfg.get("interface", None)
 
-    model_cfg = cfg.get("model", {})
-    window_seconds = int(model_cfg.get("window_seconds", 30))
-    min_train_windows = int(model_cfg.get("min_train_windows", 200))
-    model_path = model_cfg.get("path", "./ids_isoforest.joblib")
-    contamination = float(model_cfg.get("contamination", 0.02))
+def parse_rules_yaml_simple(rules_path):
+    """
+    Minimal YAML parser for our simple format.
+    Expected shape:
+    rules:
+      - id: ...
+        enabled: true
+        type: PING_SCAN
+        ...
+    """
+    rules = []
+    if not os.path.exists(rules_path):
+        return rules
+    try:
+        with open(rules_path, "r", encoding="utf-8") as f:
+            lines = [ln.rstrip("\n") for ln in f.readlines()]
+    except Exception:
+        return rules
 
-    devices = cfg.get("devices", [])
-    device_ips = [d["ip"] for d in devices]
+    cur = None
+    in_rules = False
+    for ln in lines:
+        s = ln.strip()
+        if not s or s.startswith("#"):
+            continue
+        if s == "rules:":
+            in_rules = True
+            continue
+        if not in_rules:
+            continue
 
-    rules = RuleEngine(
-        device_ips=device_ips,
-        allowed_ports=cfg.get("allowed_ports", []),
-        allowed_endpoints=cfg.get("allowed_endpoints", []),
-        scan_port_threshold=int(cfg.get("scan_port_threshold", 15)),
-        scan_dst_threshold=int(cfg.get("scan_dst_threshold", 15)),
-        exfil_bytes_threshold=int(cfg.get("exfil_bytes_threshold", 2_000_000)),
-    )
+        if s.startswith("- "):
+            if cur:
+                rules.append(cur)
+            cur = {}
+            # handle "- id: something"
+            rest = s[2:].strip()
+            if ":" in rest:
+                k, v = rest.split(":", 1)
+                cur[k.strip()] = v.strip().strip('"').strip("'")
+            continue
 
-    alerts_cfg = cfg.get("alerts", {})
-    sink = AlertSink(
-        print_enabled=bool(alerts_cfg.get("print", True)),
-        jsonl_path=alerts_cfg.get("jsonl_path", None),
-        syslog_cfg=alerts_cfg.get("syslog", {}),
-    )
+        if cur is None:
+            continue
 
-    aggregator = FlowWindowAggregator(window_seconds=window_seconds)
+        if ":" in s:
+            k, v = s.split(":", 1)
+            k = k.strip()
+            v = v.strip()
+            # basic typing
+            if v.lower() in ("true", "false"):
+                cur[k] = (v.lower() == "true")
+            else:
+                try:
+                    if "." in v:
+                        cur[k] = float(v)
+                    else:
+                        cur[k] = int(v)
+                except Exception:
+                    cur[k] = v.strip('"').strip("'")
 
-    model = AnomalyModel(path=model_path, contamination=contamination)
-    has_model = model.load_if_exists()
+    if cur:
+        rules.append(cur)
 
-    train_buffer = deque(maxlen=max(min_train_windows, 1000))
+    # only enabled
+    return [r for r in rules if r.get("enabled", True) is True]
+
+
+class Cooldown:
+    def __init__(self):
+        self.last = {}
+
+    def ok(self, key, cooldown_sec):
+        now = time.time()
+        last = self.last.get(key, 0)
+        if now - last >= cooldown_sec:
+            self.last[key] = now
+            return True
+        return False
+
+
+def build_alert(severity, atype, flow, details):
+    return {
+        "time": ts(),
+        "severity": severity,
+        "type": atype,
+        "flow": flow,
+        "details": details
+    }
+
+
+def handle_sigterm(signum, frame):
+    global RUNNING
+    RUNNING = False
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--config", required=True)
+    parser.add_argument("--alerts", required=True)
+    parser.add_argument("--log", required=True)
+    parser.add_argument("--rules", required=True)
+    parser.add_argument("--iface", default="wlan0")
+    parser.add_argument("--window", type=int, default=30)
+    parser.add_argument("--ping-threshold", type=int, default=5)
+    parser.add_argument("--cooldown", type=int, default=60)
+    parser.add_argument("--emulate", action="store_true", help="Generate synthetic events for UI testing")
+    args = parser.parse_args()
+
+    signal.signal(signal.SIGTERM, handle_sigterm)
+    signal.signal(signal.SIGINT, handle_sigterm)
+
+    cfg = load_json(args.config)
+    rules = parse_rules_yaml_simple(args.rules)
+
+    log(f"Starting capture on interface='{args.iface}', window={args.window}s", args.log)
+    log(f"Alerts file: {args.alerts}", args.log)
+    log(f"YAML rules: {args.rules} (loaded {len(rules)} rules)", args.log)
+
+    # Apply rule overrides if present, else defaults from args for ping
+    ping_rule = None
+    port_sweep_rule = None
+    for r in rules:
+        if r.get("type") == "PING_SCAN":
+            ping_rule = r
+        if r.get("type") == "PORT_SWEEP":
+            port_sweep_rule = r
+
+    ping_threshold = int(ping_rule.get("ping_threshold", args.ping_threshold)) if ping_rule else args.ping_threshold
+    ping_window = int(ping_rule.get("window_sec", args.window)) if ping_rule else args.window
+    ping_cd = int(ping_rule.get("cooldown_sec", args.cooldown)) if ping_rule else args.cooldown
+    ping_sev = (ping_rule.get("severity", "low") if ping_rule else "low")
+
+    ps_threshold = int(port_sweep_rule.get("unique_dst_port_threshold", 25)) if port_sweep_rule else 25
+    ps_window = int(port_sweep_rule.get("window_sec", args.window)) if port_sweep_rule else args.window
+    ps_cd = int(port_sweep_rule.get("cooldown_sec", args.cooldown)) if port_sweep_rule else args.cooldown
+    ps_sev = (port_sweep_rule.get("severity", "high") if port_sweep_rule else "high")
+
+    # Sliding windows
+    icmp_by_src = defaultdict(lambda: deque())          # src -> timestamps
+    ports_by_pair = defaultdict(lambda: defaultdict(lambda: deque()))  # src->dst->deque((t, dport))
+
+    cd = Cooldown()
+
+    def prune_deque(dq, window_sec):
+        cutoff = time.time() - window_sec
+        while dq and dq[0] < cutoff:
+            dq.popleft()
+
+    def prune_ports(dq, window_sec):
+        cutoff = time.time() - window_sec
+        while dq and dq[0][0] < cutoff:
+            dq.popleft()
+
+    def process_event(src, dst, proto, sport, dport, is_icmp=False):
+        now = time.time()
+
+        # --- PING_SCAN ---
+        if is_icmp:
+            dq = icmp_by_src[src]
+            dq.append(now)
+            prune_deque(dq, ping_window)
+
+            if len(dq) >= ping_threshold:
+                key = f"PING_SCAN:{src}->{dst}"
+                if cd.ok(key, ping_cd):
+                    flow = f"{src}:0 -> {dst}:0 (ICMP)"
+                    alert = build_alert(
+                        ping_sev,
+                        "PING_SCAN",
+                        flow,
+                        {"msg": "ICMP ping scan detected", "count_in_window": len(dq), "window_sec": ping_window}
+                    )
+                    safe_write_alert(args.alerts, alert)
+                    log(f"ALERT PING_SCAN src={src} dst={dst} count={len(dq)} window={ping_window}", args.log)
+
+        # --- PORT_SWEEP ---
+        if dport is not None and proto in ("TCP", "UDP"):
+            dq2 = ports_by_pair[src][dst]
+            dq2.append((now, int(dport)))
+            prune_ports(dq2, ps_window)
+
+            uniq = len(set([x[1] for x in dq2]))
+            if uniq >= ps_threshold:
+                key = f"PORT_SWEEP:{src}->{dst}"
+                if cd.ok(key, ps_cd):
+                    flow = f"{src} -> {dst} (SCAN)"
+                    alert = build_alert(
+                        ps_sev,
+                        "PORT_SWEEP_SUSPECTED",
+                        flow,
+                        {"msg": "Possible port sweep (many destination ports in one window)",
+                         "pkt_total": len(dq2),
+                         "unique_dst_port_count": uniq}
+                    )
+                    safe_write_alert(args.alerts, alert)
+                    log(f"ALERT PORT_SWEEP src={src} dst={dst} uniq_ports={uniq} window={ps_window}", args.log)
+
+    if args.emulate:
+        # Generate a clean ping scan example like your goal
+        log("Emulation enabled: generating synthetic ICMP pings + port hits", args.log)
+        src = "192.168.7.65"
+        dst = "192.168.7.16"
+        for _ in range(ping_threshold + 1):
+            if not RUNNING:
+                break
+            process_event(src, dst, "ICMP", None, None, is_icmp=True)
+            time.sleep(0.2)
+        while RUNNING:
+            time.sleep(1)
+        log("Stopped.", args.log)
+        return
+
+    if not SCAPY_OK:
+        log("ERROR: scapy not available. Install scapy or run with --emulate for UI testing.", args.log)
+        return
 
     def on_packet(pkt):
-        aggregator.observe(pkt)
+        if not RUNNING:
+            return
 
-    print(f"[IDS] Starting capture on interface={iface!r}, window={window_seconds}s, model_loaded={has_model}")
-    print("[IDS] NOTE: Run with appropriate privileges for packet capture.")
+        try:
+            if IP not in pkt:
+                return
 
-    while True:
-        sniff(iface=iface, prn=on_packet, store=False, timeout=1)
+            src = pkt[IP].src
+            dst = pkt[IP].dst
 
-        if aggregator.ready():
-            df = aggregator.flush()
-            if df.empty:
-                continue
+            # ICMP
+            if ICMP in pkt:
+                process_event(src, dst, "ICMP", None, None, is_icmp=True)
+                return
 
-            # Rule-based alerts
-            for _, row in df.iterrows():
-                a = rules.evaluate_row(row)
-                if a:
-                    sink.emit(a)
+            # TCP/UDP
+            if TCP in pkt:
+                sport = int(pkt[TCP].sport)
+                dport = int(pkt[TCP].dport)
+                process_event(src, dst, "TCP", sport, dport, is_icmp=False)
+                return
 
-            # ML training / scoring (optional)
-            if model.model is None:
-                train_buffer.append(df)
-                if sum(len(x) for x in train_buffer) >= min_train_windows:
-                    train_df = pd.concat(list(train_buffer), ignore_index=True)
-                    train_df = train_df[
-                        (train_df["src_ip"].isin(device_ips)) | (train_df["dst_ip"].isin(device_ips))
-                    ]
-                    if len(train_df) >= min_train_windows:
-                        print(f"[IDS] Training model on {len(train_df)} rows...")
-                        model.train(train_df)
-                        print(f"[IDS] Model saved to {model_path}")
-                continue
+            if UDP in pkt:
+                sport = int(pkt[UDP].sport)
+                dport = int(pkt[UDP].dport)
+                process_event(src, dst, "UDP", sport, dport, is_icmp=False)
+                return
 
-            scored = model.score(df)
-            preds = scored[:, 0]
-            scores = scored[:, 1]
+        except Exception:
+            return
 
-            for i, (_, row) in enumerate(df.iterrows()):
-                if int(preds[i]) == -1:
-                    sink.emit(Alert(
-                        ts=time.time(),
-                        severity="medium",
-                        alert_type="ANOMALY_DETECTED",
-                        src_ip=row["src_ip"],
-                        dst_ip=row["dst_ip"],
-                        src_port=int(row.get("src_port", 0)),
-                        dst_port=int(row.get("dst_port", 0)),
-                        proto=str(row["proto"]),
-                        details={
-                            "msg": "Anomalous traffic pattern in window",
-                            "model_score": float(scores[i]),
-                            "features": {
-                                "pkt_count": int(row["pkt_count"]),
-                                "byte_count": int(row["byte_count"]),
-                                "avg_pkt_size": float(row["avg_pkt_size"]),
-                                "unique_dst_count": int(row["unique_dst_count"]),
-                                "unique_dst_port_count": int(row["unique_dst_port_count"]),
-                                "tcp_syn_count_src": int(row["tcp_syn_count_src"]),
-                                "tcp_rst_count_src": int(row["tcp_rst_count_src"]),
-                                "dst_port": int(row["dst_port"]),
-                            }
-                        },
-                    ))
+    # sniff loop
+    while RUNNING:
+        try:
+            sniff(iface=args.iface, prn=on_packet, store=False, timeout=2)
+        except Exception as e:
+            log(f"Capture error: {e}", args.log)
+            time.sleep(1)
+
+    log("Signal received, stopping...", args.log)
+    log("Stopped.", args.log)
 
 
 if __name__ == "__main__":
-    run_ids("config.yaml")
+    main()
